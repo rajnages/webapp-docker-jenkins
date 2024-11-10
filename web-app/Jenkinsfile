@@ -1,23 +1,26 @@
 pipeline {
     agent any
     
+    tools {
+        nodejs 'node16'  // Make sure this tool is configured in Jenkins
+    }
+    
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub')
         DOCKER_IMAGE = "rajnages/modern-todo-app"
         DOCKER_TAG = "${BUILD_NUMBER}"
+        SONAR_PROJECT_KEY = "modern-todo-app"  // Configure this based on your SonarQube project
     }
     
     stages {
         stage('Checkout') {
             steps {
-                // Get code from repository
                 checkout scm
             }
         }
         
         stage('Install Dependencies') {
             steps {
-                // Install Node.js dependencies
                 sh 'npm install'
             }
         }
@@ -27,13 +30,40 @@ pipeline {
                 script {
                     def hasTests = fileExists('package.json') && sh(
                         script: 'cat package.json | grep -c "test"',
-                    returnStatus: true
-            ) == 0
-            
-            if (hasTests) {
-                sh 'npm test'
-            } else {
-                echo "No tests configured - skipping test stage"
+                        returnStatus: true
+                    ) == 0
+                    
+                    if (hasTests) {
+                        sh 'npm test'
+                    } else {
+                        echo "No tests configured - skipping test stage"
+                    }
+                }
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            environment {
+                SCANNER_HOME = tool 'sonar-scanner'  // Make sure this tool is configured in Jenkins
+            }
+            steps {
+                withSonarQubeEnv('SonarQube-Server') {  // Make sure this is configured in Jenkins
+                    sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.sources=. \
+                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                        -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
+                        -Dsonar.qualitygate.wait=true
+                    """
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
@@ -41,9 +71,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build Docker image
                     sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                    // Tag as latest
                     sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
                 }
             }
@@ -51,14 +79,12 @@ pipeline {
         
         stage('Login to DockerHub') {
             steps {
-                // Login to DockerHub
                 sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
             }
         }
         
         stage('Push to DockerHub') {
             steps {
-                // Push both tagged and latest versions
                 sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 sh "docker push ${DOCKER_IMAGE}:latest"
             }
@@ -67,10 +93,16 @@ pipeline {
     
     post {
         always {
-            // Cleanup: remove Docker images and logout from DockerHub
             sh 'docker logout'
             sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}"
             sh "docker rmi ${DOCKER_IMAGE}:latest"
+            cleanWs()  // Clean workspace after build
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
