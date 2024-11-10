@@ -76,10 +76,10 @@ pipeline {
                                 
                                 if [ -f "package.json" ]; then
                                     npm install
-                                elif [ -f "webapp-docker-jenkins/package.json" ]; then
-                                    cd webapp-docker-jenkins && npm install
-                                elif [ -f "package.json" ]; then
-                                    npm install
+                                elif [ -f "webapp-docker-jenkins/web-app/package.json" ]; then
+                                    cd webapp-docker-jenkins/web-app && npm install
+                                elif [ -f "web-app/package.json" ]; then
+                                    cd web-app && npm install
                                 else
                                     echo "Error: package.json not found"
                                     exit 1
@@ -96,7 +96,7 @@ pipeline {
                 stage("Build & Push Docker Image") {
                     steps {
                         script {
-                            dir('webapp-docker-jenkins') {  // Navigate to the directory containing Dockerfile
+                            dir('webapp-docker-jenkins/web-app') {  // Navigate to the directory containing Dockerfile
                                 sh 'pwd && ls -la'  // Debug: show current directory and contents
                                 
                                 docker.withRegistry('',DOCKER_PASS) {
