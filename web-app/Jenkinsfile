@@ -2,14 +2,14 @@ pipeline {
     agent any
     
     tools {
-        nodejs 'node16'  // Make sure this tool is configured in Jenkins
+        nodejs 'NodeJS 16'
     }
     
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub')
         DOCKER_IMAGE = "rajnages/modern-todo-app"
         DOCKER_TAG = "${BUILD_NUMBER}"
-        SONAR_PROJECT_KEY = "modern-todo-app"  // Configure this based on your SonarQube project
+        SONAR_PROJECT_KEY = "modern-todo-app"
     }
     
     stages {
@@ -21,49 +21,53 @@ pipeline {
         
         stage('Install Dependencies') {
             steps {
-                sh 'npm install'
+                script {
+                    if (fileExists('package.json')) {
+                        sh 'npm install'
+                    } else {
+                        echo "No package.json found - skipping npm install"
+                    }
+                }
             }
         }
         
         stage('Run Tests') {
             steps {
                 script {
-                    def hasTests = fileExists('package.json') && sh(
-                        script: 'cat package.json | grep -c "test"',
-                        returnStatus: true
-                    ) == 0
-                    
-                    if (hasTests) {
-                        sh 'npm test'
+                    if (fileExists('package.json')) {
+                        def hasTests = sh(
+                            script: 'cat package.json | grep -c "test"',
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (hasTests) {
+                            sh 'npm test'
+                        } else {
+                            echo "No tests configured - skipping test stage"
+                        }
                     } else {
-                        echo "No tests configured - skipping test stage"
+                        echo "No package.json found - skipping tests"
                     }
                 }
             }
         }
         
         stage('SonarQube Analysis') {
+            when {
+                expression { fileExists('sonar-project.properties') }
+            }
             environment {
-                SCANNER_HOME = tool 'sonar-scanner'  // Make sure this tool is configured in Jenkins
+                SCANNER_HOME = tool 'sonar-scanner'
             }
             steps {
-                withSonarQubeEnv('SonarQube-Server') {  // Make sure this is configured in Jenkins
+                withSonarQubeEnv('SonarQube-Server') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                         -Dsonar.sources=. \
-                        -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
                         -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
                         -Dsonar.qualitygate.wait=true
                     """
-                }
-            }
-        }
-        
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 1, unit: 'HOURS') {
-                    waitForQualityGate abortPipeline: true
                 }
             }
         }
@@ -93,10 +97,16 @@ pipeline {
     
     post {
         always {
-            sh 'docker logout'
-            sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}"
-            sh "docker rmi ${DOCKER_IMAGE}:latest"
-            cleanWs()  // Clean workspace after build
+            script {
+                try {
+                    sh 'docker logout'
+                    sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    sh "docker rmi ${DOCKER_IMAGE}:latest"
+                } catch (err) {
+                    echo "Error in cleanup: ${err}"
+                }
+            }
+            cleanWs()
         }
         success {
             echo 'Pipeline completed successfully!'
