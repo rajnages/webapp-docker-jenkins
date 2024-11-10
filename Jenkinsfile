@@ -96,18 +96,15 @@ pipeline {
                 stage("Build & Push Docker Image") {
                     steps {
                         script {
-                            dir('webapp-docker-jenkins') {  // Navigate to the directory containing Dockerfile
-                                sh 'pwd && ls -la'  // Debug: show current directory and contents
-                                
-                                docker.withRegistry('',DOCKER_PASS) {
-                                    // Build with specific Dockerfile path and context
-                                    docker_image = docker.build("${IMAGE_NAME}", "-f Dockerfile .")
-                                }
-                                
-                                docker.withRegistry('',DOCKER_PASS) {
-                                    docker_image.push("${IMAGE_TAG}")
-                                    docker_image.push('latest')
-                                }
+                            // Build Docker image
+                            sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                            sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
+                            
+                            // Login and Push to DockerHub
+                            withCredentials([string(credentialsId: 'dockerhub', variable: 'dockerhubpwd')]) {
+                                sh "docker login -u rajnages -p ${dockerhubpwd}"
+                                sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                                sh "docker push ${IMAGE_NAME}:latest"
                             }
                         }
                     }
