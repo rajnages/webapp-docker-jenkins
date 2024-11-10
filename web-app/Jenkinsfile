@@ -1,118 +1,112 @@
 pipeline {
     agent any
-    
+    options {
+        parallelsAlwaysFailFast()
+        timestamps()
+        timeout(time: 1, unit: 'HOURS')
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)  // For better control of checkout
+    }
     tools {
+        //jdk 'jdk'
         nodejs 'node16'
     }
-    
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub')
-        DOCKER_IMAGE = "rajnages/modern-todo-app"
-        DOCKER_TAG = "${BUILD_NUMBER}"
-        SONAR_PROJECT_KEY = "modern-todo-app"
+        SCANNER_HOME = tool 'sonar-scanner'
+        APP_NAME = "reddit-clone-pipeline"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "rajnages"
+        DOCKER_PASS = 'dockerhub'
+        IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+	    //JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
     }
-    
     stages {
-        stage('Checkout') {
+        stage('clean workspace') {
             steps {
-                checkout scm
+                cleanWs()
             }
         }
-        
-        stage('Install Dependencies') {
+        stage('Checkout from Git') {
             steps {
-                script {
-                    if (fileExists('package.json')) {
-                        sh 'npm install'
-                    } else {
-                        echo "No package.json found - skipping npm install"
-                    }
-                }
+                git branch: 'main', url: 'https://github.com/rajnages/webapp-docker-jenkins.git'
             }
         }
-        
-        stage('Run Tests') {
-            steps {
-                script {
-                    if (fileExists('package.json')) {
-                        def hasTests = sh(
-                            script: 'cat package.json | grep -c "test"',
-                            returnStatus: true
-                        ) == 0
-                        
-                        if (hasTests) {
-                            sh 'npm test'
-                        } else {
-                            echo "No tests configured - skipping test stage"
-                        }
-                    } else {
-                        echo "No package.json found - skipping tests"
-                    }
-                }
-            }
-        }
-        
-        stage('SonarQube Analysis') {
-            when {
-                expression { fileExists('sonar-project.properties') }
-            }
-            environment {
-                SCANNER_HOME = tool 'sonar-scanner'
-            }
+        stage("Sonarqube Analysis") {
             steps {
                 withSonarQubeEnv('SonarQube-Server') {
-                    sh """
-                        ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                        -Dsonar.sources=. \
-                        -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/dist/**,**/build/** \
-                        -Dsonar.qualitygate.wait=true
-                    """
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=modern-todo-app \
+                    -Dsonar.projectKey=modern-todo-app'''
                 }
             }
         }
-        
-        stage('Build Docker Image') {
+        stage("Quality Gate") {
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
                 }
             }
         }
-        
-        stage('Login to DockerHub') {
+        stage('Install Dependencies') {
             steps {
-                sh 'echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin'
+                sh "npm install"
             }
         }
-        
-        stage('Push to DockerHub') {
+        // stage('TRIVY FS SCAN') {
+        //     steps {
+        //         script {
+        //             sh '''
+        //                 # Create cache directory in workspace
+        //                 mkdir -p .trivycache
+                        
+        //                 # Run Trivy with cache directory
+        //                 trivy --cache-dir .trivycache fs . > trivyfs.txt || true
+        //             '''
+        //         }
+        //     }
+        // }
+        stage("Build & Push Docker Image") {
             steps {
-                sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                sh "docker push ${DOCKER_IMAGE}:latest"
-            }
-        }
-    }
-    
-    post {
-        always {
-            script {
-                try {
-                    sh 'docker logout'
-                    sh "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    sh "docker rmi ${DOCKER_IMAGE}:latest"
-                } catch (err) {
-                    echo "Error in cleanup: ${err}"
-                }
-            }
-            cleanWs()
-        }
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
-        }
-    }
+                script {
+                    docker.withRegistry('',DOCKER_PASS) {
+                         docker_image = docker.build "${IMAGE_NAME}"
+                     }
+                    docker.withRegistry('',DOCKER_PASS) {
+                         docker_image.push("${IMAGE_TAG}")
+                         docker_image.push('latest')
+                     }
+                 }
+             }
+         }
+        // stage("Trivy Image Scan") {
+        //     steps {
+        //         script {
+        //             sh '''
+        //                 docker run -v /var/run/docker.sock:/var/run/docker.sock \
+        //                     aquasec/trivy image ${IMAGE_NAME}:latest \
+        //                     --no-progress \
+        //                     --scanners vuln \
+        //                     --exit-code 0 \
+        //                     --severity HIGH,CRITICAL \
+        //                     --format table > trivyimage.txt || true
+        //             '''
+        //         }
+        //     }
+        // }
+        stage ('Cleanup Artifacts') {
+            steps {
+                 script {
+                      sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                      sh "docker rmi ${IMAGE_NAME}:latest"
+                 }
+             }
+         }
+        // stage("Trigger CD Pipeline") {
+        //     steps {
+        //         script {
+        //             sh "curl -v -k --user clouduser:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'ec2-54-162-120-219.compute-1.amazonaws.com:8080/job/main-clone-app-CD/buildWithParameters?token=gitops-token'"
+        //         }
+        //     }
+        //  }
+    }   
 }
