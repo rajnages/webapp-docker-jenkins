@@ -101,10 +101,12 @@ pipeline {
                             sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
                             
                             // Login and Push to DockerHub
-                            withCredentials([string(credentialsId: 'dockerhub', variable: 'dockerhubpwd')]) {
-                                sh "docker login -u rajnages -p ${dockerhubpwd}"
-                                sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
-                                sh "docker push ${IMAGE_NAME}:latest"
+                            withCredentials([string(credentialsId: 'dockerhub', variable: 'DOCKER_PASSWORD')]) {
+                                sh '''
+                                    echo "$DOCKER_PASSWORD" | docker login -u ${DOCKER_USER} --password-stdin
+                                    docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                                    docker push ${IMAGE_NAME}:latest
+                                '''
                             }
                         }
                     }
