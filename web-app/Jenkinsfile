@@ -65,7 +65,27 @@ pipeline {
                 }
                 stage('Install Dependencies') {
                     steps {
-                        sh "npm install"
+                        script {
+                            sh '''
+                                echo "Current directory:"
+                                pwd
+                                echo "\nDirectory contents:"
+                                ls -la
+                                echo "\nFinding package.json:"
+                                find . -name "package.json"
+                                
+                                if [ -f "package.json" ]; then
+                                    npm install
+                                elif [ -f "webapp-docker-jenkins/web-app/package.json" ]; then
+                                    cd webapp-docker-jenkins/web-app && npm install
+                                elif [ -f "web-app/package.json" ]; then
+                                    cd web-app && npm install
+                                else
+                                    echo "Error: package.json not found"
+                                    exit 1
+                                fi
+                            '''
+                        }
                     }
                 }
             }
