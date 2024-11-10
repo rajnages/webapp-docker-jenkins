@@ -22,97 +22,143 @@ pipeline {
 	    //JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
     }
     stages {
-        stage('clean workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-        stage('Checkout from Git') {
-            steps {
-                git branch: 'main', url: 'https://github.com/rajnages/webapp-docker-jenkins.git'
-            }
-        }
-        stage("Sonarqube Analysis") {
-            steps {
-                withSonarQubeEnv('SonarQube-Server') {
-                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=modern-todo-app \
-                    -Dsonar.projectKey=modern-todo-app'''
+        stage('Initial Setup') {
+            parallel {
+                stage('clean workspace') {
+                    steps {
+                        cleanWs()
+                    }
+                }
+                stage('Checkout from Git') {
+                    steps {
+                        git branch: 'main', url: 'https://github.com/rajnages/webapp-docker-jenkins.git'
+                    }
                 }
             }
         }
-        stage("Quality Gate") {
-            steps {
-                timeout(time: 2, unit: 'MINUTES') {
-                    script {
-                        def qg = waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
-                        if (qg.status != 'OK') {
-                            echo "Quality Gate status is: ${qg.status}"
-                            // Pipeline will continue even if Quality Gate fails
+
+        stage('Analysis and Dependencies') {
+            parallel {
+                stage('Sonar Analysis') {
+                    stages {
+                        stage("Sonarqube Analysis") {
+                            steps {
+                                withSonarQubeEnv('SonarQube-Server') {
+                                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=modern-todo-app \
+                                    -Dsonar.projectKey=modern-todo-app'''
+                                }
+                            }
+                        }
+                        stage("Quality Gate") {
+                            steps {
+                                timeout(time: 2, unit: 'MINUTES') {
+                                    script {
+                                        def qg = waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                                        if (qg.status != 'OK') {
+                                            echo "Quality Gate status is: ${qg.status}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('Install Dependencies') {
+                    steps {
+                        sh "npm install"
+                    }
+                }
+            }
+        }
+
+        stage("Docker Operations") {
+            stages {
+                stage("Build & Push Docker Image") {
+                    steps {
+                        script {
+                            docker.withRegistry('',DOCKER_PASS) {
+                                docker_image = docker.build "${IMAGE_NAME}"
+                                docker_image.push("${IMAGE_TAG}")
+                                docker_image.push('latest')
+                            }
+                        }
+                    }
+                }
+                
+                stage ('Cleanup Artifacts') {
+                    steps {
+                        script {
+                            sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                            sh "docker rmi ${IMAGE_NAME}:latest"
                         }
                     }
                 }
             }
         }
-        stage('Install Dependencies') {
-            steps {
-                sh "npm install"
+    }   
+
+    post {
+        success {
+            script {
+                emailext subject: "Pipeline Successful: ${currentBuild.fullDisplayName}",
+                         body: """<p>The pipeline completed successfully!</p>
+                                 <p>Build Number: ${BUILD_NUMBER}</p>
+                                 <p>Build URL: ${BUILD_URL}</p>""",
+                         to: 'rajavarapunages@gmail.com',
+                         mimeType: 'text/html'
+                
+                slackSend(
+                    color: 'good',
+                    message: "Pipeline Successful: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})"
+                )
             }
         }
-        // stage('TRIVY FS SCAN') {
-        //     steps {
-        //         script {
-        //             sh '''
-        //                 # Create cache directory in workspace
-        //                 mkdir -p .trivycache
-                        
-        //                 # Run Trivy with cache directory
-        //                 trivy --cache-dir .trivycache fs . > trivyfs.txt || true
-        //             '''
-        //         }
-        //     }
-        // }
-        stage("Build & Push Docker Image") {
-            steps {
-                script {
-                    docker.withRegistry('',DOCKER_PASS) {
-                         docker_image = docker.build "${IMAGE_NAME}"
-                     }
-                    docker.withRegistry('',DOCKER_PASS) {
-                         docker_image.push("${IMAGE_TAG}")
-                         docker_image.push('latest')
-                     }
-                 }
-             }
-         }
-        // stage("Trivy Image Scan") {
-        //     steps {
-        //         script {
-        //             sh '''
-        //                 docker run -v /var/run/docker.sock:/var/run/docker.sock \
-        //                     aquasec/trivy image ${IMAGE_NAME}:latest \
-        //                     --no-progress \
-        //                     --scanners vuln \
-        //                     --exit-code 0 \
-        //                     --severity HIGH,CRITICAL \
-        //                     --format table > trivyimage.txt || true
-        //             '''
-        //         }
-        //     }
-        // }
-        stage ('Cleanup Artifacts') {
-            steps {
-                 script {
-                      sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
-                      sh "docker rmi ${IMAGE_NAME}:latest"
-                 }
-             }
-         }
-        // stage("Trigger CD Pipeline") {
-        //     steps {
-        //         script {
-        //             sh "curl -v -k --user clouduser:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'ec2-54-162-120-219.compute-1.amazonaws.com:8080/job/main-clone-app-CD/buildWithParameters?token=gitops-token'"
-        //         }
-        //     }
-        //  }
-    }   
+        
+        failure {
+            script {
+                emailext subject: "Pipeline Failed: ${currentBuild.fullDisplayName}",
+                         body: """<p>The pipeline has failed!</p>
+                                 <p>Build Number: ${BUILD_NUMBER}</p>
+                                 <p>Build URL: ${BUILD_URL}</p>
+                                 <p>Error: ${currentBuild.description}</p>""",
+                         to: 'rajavarapunages@gmail.com',
+                         mimeType: 'text/html'
+                
+                slackSend(
+                    color: 'danger',
+                    message: "Pipeline Failed: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})"
+                )
+            }
+        }
+        
+        always {
+            script {
+                // Cleanup workspace
+                cleanWs()
+                
+                // Remove any dangling Docker images
+                sh '''
+                    docker system prune -f
+                    docker image prune -f
+                '''
+                
+                // Archive artifacts
+                archiveArtifacts artifacts: '**/target/*.jar, **/reports/**/*', allowEmptyArchive: true
+                
+                // Publish test results if they exist
+                junit allowEmptyResults: true, testResults: '**/test-results/*.xml'
+            }
+        }
+        
+        unstable {
+            script {
+                emailext subject: "Pipeline Unstable: ${currentBuild.fullDisplayName}",
+                         body: """<p>The pipeline is unstable!</p>
+                                 <p>Build Number: ${BUILD_NUMBER}</p>
+                                 <p>Build URL: ${BUILD_URL}</p>""",
+                         to: 'rajavarapunages@gmail.com',
+                         mimeType: 'text/html'
+            }
+        }
+    }
 }
