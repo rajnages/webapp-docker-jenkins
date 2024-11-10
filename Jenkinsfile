@@ -13,7 +13,7 @@ pipeline {
     }
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        APP_NAME = "reddit-clone-pipeline"
+        APP_NAME = "webapp-docker-jenkins"
         RELEASE = "1.0.0"
         DOCKER_USER = "rajnages"
         DOCKER_PASS = 'dockerhub'
