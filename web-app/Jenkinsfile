@@ -42,8 +42,14 @@ pipeline {
         }
         stage("Quality Gate") {
             steps {
-                script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                timeout(time: 2, unit: 'MINUTES') {
+                    script {
+                        def qg = waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                        if (qg.status != 'OK') {
+                            echo "Quality Gate status is: ${qg.status}"
+                            // Pipeline will continue even if Quality Gate fails
+                        }
+                    }
                 }
             }
         }
