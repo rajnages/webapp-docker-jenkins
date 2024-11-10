@@ -1,0 +1,152 @@
+pipeline {
+    agent any
+    options {
+        parallelsAlwaysFailFast()
+        timestamps()
+        timeout(time: 1, unit: 'HOURS')
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)  // For better control of checkout
+    }
+    tools {
+        //jdk 'jdk'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        APP_NAME = "reddit-clone-pipeline"
+        RELEASE = "1.0.0"
+        DOCKER_USER = "rajnages"
+        DOCKER_PASS = 'dockerhub'
+        IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
+        IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+	    //JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
+    }
+    stages {
+        stage('Initial Setup') {
+            parallel {
+                stage('clean workspace') {
+                    steps {
+                        cleanWs()
+                    }
+                }
+                stage('Checkout from Git') {
+                    steps {
+                        git branch: 'main', url: 'https://github.com/rajnages/webapp-docker-jenkins.git'
+                    }
+                }
+            }
+        }
+
+        stage('Analysis and Dependencies') {
+            parallel {
+                stage('Sonar Analysis') {
+                    stages {
+                        stage("Sonarqube Analysis") {
+                            steps {
+                                withSonarQubeEnv('SonarQube-Server') {
+                                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=modern-todo-app \
+                                    -Dsonar.projectKey=modern-todo-app'''
+                                }
+                            }
+                        }
+                        stage("Quality Gate") {
+                            steps {
+                                timeout(time: 2, unit: 'MINUTES') {
+                                    script {
+                                        def qg = waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                                        if (qg.status != 'OK') {
+                                            echo "Quality Gate status is: ${qg.status}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                stage('Install Dependencies') {
+                    steps {
+                        script {
+                            sh '''
+                                echo "Current directory:"
+                                pwd
+                                echo "\nDirectory contents:"
+                                ls -la
+                                echo "\nFinding package.json:"
+                                find . -name "package.json"
+                                
+                                if [ -f "package.json" ]; then
+                                    npm install
+                                elif [ -f "webapp-docker-jenkins/web-app/package.json" ]; then
+                                    cd webapp-docker-jenkins/web-app && npm install
+                                elif [ -f "web-app/package.json" ]; then
+                                    cd web-app && npm install
+                                else
+                                    echo "Error: package.json not found"
+                                    exit 1
+                                fi
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage("Docker Operations") {
+            stages {
+                stage("Build & Push Docker Image") {
+                    steps {
+                        script {
+                            dir('webapp-docker-jenkins/web-app') {  // Navigate to the directory containing Dockerfile
+                                sh 'pwd && ls -la'  // Debug: show current directory and contents
+                                
+                                docker.withRegistry('',DOCKER_PASS) {
+                                    // Build with specific Dockerfile path and context
+                                    docker_image = docker.build("${IMAGE_NAME}", "-f Dockerfile .")
+                                }
+                                
+                                docker.withRegistry('',DOCKER_PASS) {
+                                    docker_image.push("${IMAGE_TAG}")
+                                    docker_image.push('latest')
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                stage ('Cleanup Artifacts') {
+                    steps {
+                        script {
+                            sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
+                            sh "docker rmi ${IMAGE_NAME}:latest"
+                        }
+                    }
+                }
+            }
+        }
+    }   
+
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        
+        failure {
+            echo "Pipeline failed! Check logs for details."
+        }
+        
+        always {
+            script {
+                // Cleanup workspace
+                cleanWs()
+                
+                // Remove any dangling Docker images
+                sh '''
+                    docker system prune -f
+                    docker image prune -f
+                '''
+                
+                echo "Pipeline finished - cleanup completed"
+            }
+        }
+    }
+}
