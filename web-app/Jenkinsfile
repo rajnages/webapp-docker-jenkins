@@ -99,36 +99,11 @@ pipeline {
 
     post {
         success {
-            script {
-                emailext subject: "Pipeline Successful: ${currentBuild.fullDisplayName}",
-                         body: """<p>The pipeline completed successfully!</p>
-                                 <p>Build Number: ${BUILD_NUMBER}</p>
-                                 <p>Build URL: ${BUILD_URL}</p>""",
-                         to: 'rajavarapunages@gmail.com',
-                         mimeType: 'text/html'
-                
-                slackSend(
-                    color: 'good',
-                    message: "Pipeline Successful: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})"
-                )
-            }
+            echo "Pipeline completed successfully!"
         }
         
         failure {
-            script {
-                emailext subject: "Pipeline Failed: ${currentBuild.fullDisplayName}",
-                         body: """<p>The pipeline has failed!</p>
-                                 <p>Build Number: ${BUILD_NUMBER}</p>
-                                 <p>Build URL: ${BUILD_URL}</p>
-                                 <p>Error: ${currentBuild.description}</p>""",
-                         to: 'rajavarapunages@gmail.com',
-                         mimeType: 'text/html'
-                
-                slackSend(
-                    color: 'danger',
-                    message: "Pipeline Failed: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' (${env.BUILD_URL})"
-                )
-            }
+            echo "Pipeline failed! Check logs for details."
         }
         
         always {
@@ -142,22 +117,7 @@ pipeline {
                     docker image prune -f
                 '''
                 
-                // Archive artifacts
-                archiveArtifacts artifacts: '**/target/*.jar, **/reports/**/*', allowEmptyArchive: true
-                
-                // Publish test results if they exist
-                junit allowEmptyResults: true, testResults: '**/test-results/*.xml'
-            }
-        }
-        
-        unstable {
-            script {
-                emailext subject: "Pipeline Unstable: ${currentBuild.fullDisplayName}",
-                         body: """<p>The pipeline is unstable!</p>
-                                 <p>Build Number: ${BUILD_NUMBER}</p>
-                                 <p>Build URL: ${BUILD_URL}</p>""",
-                         to: 'rajavarapunages@gmail.com',
-                         mimeType: 'text/html'
+                echo "Pipeline finished - cleanup completed"
             }
         }
     }
