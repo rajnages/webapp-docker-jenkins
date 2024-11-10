@@ -97,21 +97,14 @@ pipeline {
                     steps {
                         script {
                             dir('webapp-docker-jenkins/web-app') {  // Navigate to the directory containing Dockerfile
-                                sh '''
-                                    echo "Current directory: $(pwd)"
-                                    echo "Directory contents:"
-                                    ls -la
-                                    
-                                    if [ ! -f "Dockerfile" ]; then
-                                        echo "Error: Dockerfile not found in $(pwd)"
-                                        echo "Available files:"
-                                        find . -type f
-                                        exit 1
-                                    fi
-                                '''
+                                sh 'pwd && ls -la'  // Debug: show current directory and contents
                                 
                                 docker.withRegistry('',DOCKER_PASS) {
-                                    docker_image = docker.build "${IMAGE_NAME}"
+                                    // Build with specific Dockerfile path and context
+                                    docker_image = docker.build("${IMAGE_NAME}", "-f Dockerfile .")
+                                }
+                                
+                                docker.withRegistry('',DOCKER_PASS) {
                                     docker_image.push("${IMAGE_TAG}")
                                     docker_image.push('latest')
                                 }
