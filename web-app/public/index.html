@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Modern To-Do List</title>
+   <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+   <!-- Gradient Background -->
+   <div class="background-gradient"></div>
+
+   <div class="container">
+      <h1 class="title">My Tasks</h1>
+
+      <!-- Progress Circle -->
+      <div class="progress-circle" id="progressCircle">
+         <span id="progressText">0%</span>
+      </div>
+
+      <!-- Task List -->
+      <div class="task-list-container">
+         <ul id="taskList" class="task-list"></ul>
+      </div>
+
+      <!-- Floating Action Button for Adding Tasks -->
+      <button class="fab" onclick="openModal()">+</button>
+
+      <!-- Task Modal -->
+      <div id="taskModal" class="modal">
+         <div class="modal-content">
+            <h2 class="modal-title">Add a New Task</h2>
+            <input type="text" id="taskInput" placeholder="Enter your task..." class="task-input">
+            <div class="modal-buttons">
+               <button class="add-button" onclick="addTask()">Add Task</button>
+               <button class="cancel-button" onclick="closeModal()">Cancel</button>
+            </div>
+         </div>
+      </div>
+   </div>
+
+   <script src="app.js"></script>
+</body>
+</html>
